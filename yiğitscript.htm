@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YiğitScript</title>
+
+<style>
+body{
+    font-family: Arial;
+    background:#1e1e1e;
+    color:white;
+    padding:20px;
+}
+
+textarea{
+    width:500px;
+    height:250px;
+    background:#2d2d2d;
+    color:white;
+    border:none;
+    padding:10px;
+    resize:none;
+}
+
+button{
+    margin-top:10px;
+    padding:8px 14px;
+}
+
+#alan{
+    margin-top:10px;
+}
+</style>
+</head>
+
+<body>
+<a href="yiğitscriptİndirilen.html" download="yiğitscriptİndirilen">Yiğitscript'i yükle</a>
+<h2>YiğitScript</h2>
+
+<textarea id="kod">yaz: "merhaba dünya"</textarea>
+<br>
+<button onclick="başlat()">Çalıştır</button>
+
+<div id="alan"></div>
+<p id="çıktı"></p>
+
+<script>
+
+// ======================================================
+// GLOBAL DEĞİŞKENLER
+// ======================================================
+
+let değişkenler = {};
+let fonksiyonlar = {};
+let girişSonucu = "";
+let döngüKır = false;
+
+
+// ======================================================
+// ÖZEL KARAKTER TEMİZLEME (REGEX KAÇIŞI)
+// ======================================================
+
+function regexKaçış(text){
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+
+// ======================================================
+// KULLANICI GİRİŞİ (METİN)
+// ======================================================
+
+function girişAl(){
+    return new Promise(resolve => {
+
+        const alan = document.getElementById("alan");
+        alan.innerHTML = "";
+
+        const input = document.createElement("input");
+
+        const buton = document.createElement("button");
+        buton.textContent = "Gönder";
+
+        buton.onclick = () => {
+            let değer = input.value;
+            girişSonucu = değer;
+            alan.innerHTML = "";
+            resolve(değer);
+        };
+
+        alan.appendChild(input);
+        alan.appendChild(buton);
+    });
+}
+
+
+// ======================================================
+// KULLANICI GİRİŞİ (SAYI)
+// ======================================================
+
+function sayıGirişAl(){
+    return new Promise(resolve => {
+
+        const alan = document.getElementById("alan");
+        alan.innerHTML = "";
+
+        const input = document.createElement("input");
+        input.type = "number";
+
+        const buton = document.createElement("button");
+        buton.textContent = "Gönder";
+
+        buton.onclick = () => {
+            let değer = Number(input.value);
+            girişSonucu = değer;
+            alan.innerHTML = "";
+            resolve(değer);
+        };
+
+        alan.appendChild(input);
+        alan.appendChild(buton);
+    });
+}
+
+
+// ======================================================
+// DEĞİŞKENLERİ METNE YERLEŞTİR
+// ======================================================
+
+function değişkenYerleştir(metin){
+
+    for(let ad in değişkenler){
+
+        let safe = regexKaçış(ad);
+
+        metin = metin.replace(
+            new RegExp("\\b" + safe + "\\b", "g"),
+            değişkenler[ad]
+        );
+    }
+
+    return metin;
+}
+
+
+// ======================================================
+// HESAPLAMA MOTORU
+// ======================================================
+
+function hesapla(ifade){
+
+    ifade = değişkenYerleştir(ifade);
+
+    try{
+        return Function("return (" + ifade + ")")();
+    }
+    catch{
+        return ifade;
+    }
+}
+
+
+// ======================================================
+// KOŞUL MOTORU
+// ======================================================
+
+function koşulKontrol(koşul){
+
+    koşul = değişkenYerleştir(koşul);
+
+    try{
+        return Function("return (" + koşul + ")")();
+    }
+    catch{
+        return false;
+    }
+}
+
+
+// ======================================================
+// EKRANA YAZ
+// ======================================================
+
+function yazdır(metin, çıktı){
+
+    try{
+
+        if(metin.includes("cevap()")){
+            metin = metin.replace("cevap()", `"${girişSonucu}"`);
+        }
+
+        let sonuç = Function("return (" + değişkenYerleştir(metin) + ")")();
+
+        çıktı.innerHTML += sonuç + "<br>";
+
+    }catch{
+
+        metin = metin
+            .replaceAll('"',"")
+            .replaceAll("'","");
+
+        çıktı.innerHTML += metin + "<br>";
+    }
+}
+
+
+// ======================================================
+// BLOK PARÇALAYICI
+// ======================================================
+
+function blokAl(satırlar, başlangıç){
+
+    let blok = [];
+    let derinlik = 0;
+
+    for(let i=başlangıç;i<satırlar.length;i++){
+
+        let satır = satırlar[i];
+
+        if(satır.includes("{")) derinlik++;
+        if(satır.includes("}")) derinlik--;
+
+        if(i !== başlangıç){
+            blok.push(satır);
+        }
+
+        if(derinlik === 0){
+            return {blok, bitiş:i};
+        }
+    }
+
+    return {blok, bitiş:satırlar.length-1};
+}
+
+
+// ======================================================
+// ANA YORUMLAYICI (INTERPRETER)
+// ======================================================
+
+async function çalıştır(satırlar, çıktı){
+
+    for(let i=0;i<satırlar.length;i++){
+
+        let satır = satırlar[i].trim();
+        if(!satır || satır==="}") continue;
+
+
+        // ======================================
+        // DEĞİŞKEN TANIMI
+        // ======================================
+
+        if(satır.startsWith("değişken ")){
+
+            let [ad,değer] = satır
+                .replace("değişken ","")
+                .split("=");
+
+            ad = ad.trim();
+            değer = değer.trim();
+
+
+            // ---- GİRİŞ AL (METİN)
+            if(değer === "giriş al"){
+
+                değişkenler[ad] = await girişAl();
+            }
+
+            // ---- GİRİŞ AL (SAYI)
+            else if(değer === "sayı ile giriş al:"){
+
+                değişkenler[ad] = await sayıGirişAl();
+            }
+
+            // ---- NORMAL HESAP
+            else{
+
+                değişkenler[ad] = hesapla(değer);
+            }
+        }
+
+
+        // ======================================
+        // ARKAPLAN RENGİ
+        // ======================================
+
+        else if(satır.startsWith("arka plan:")){
+
+            let renk = satır.replace("arka plan:","").trim();
+
+            if(renk === "beyaz"){
+                document.body.style.background = "white";
+            }
+            else if(renk === "siyah"){
+                document.body.style.background = "black";
+            }
+            else if(renk === "mavi"){
+                document.body.style.background = "blue";
+            }
+            else if(renk.includes("RGB")){
+
+                let rgb = renk
+                    .replace(/[RGB()]/g,"")
+                    .split(",")
+                    .map(x => Number(x.trim()));
+
+                document.body.style.background =
+                    `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+            }
+        }
+
+
+        // ======================================
+        // YAZ
+        // ======================================
+
+        else if(satır.startsWith("yaz:")){
+
+            yazdır(satır.replace("yaz:",""), çıktı);
+        }
+
+
+        // ======================================
+        // WHILE
+        // ======================================
+
+        else if(satır.startsWith("iken:")){
+
+            let koşul = satır
+                .replace("iken:","")
+                .replace("{","")
+                .trim();
+
+            let {blok,bitiş} = blokAl(satırlar,i);
+
+            let güvenlik = 0;
+
+            while(koşulKontrol(koşul)){
+
+                await çalıştır(blok, çıktı);
+
+                if(döngüKır){
+                    döngüKır = false;
+                    break;
+                }
+
+                if(++güvenlik > 1000) break;
+            }
+
+            i = bitiş;
+        }
+
+
+        // ======================================
+        // BREAK
+        // ======================================
+
+        else if(satır === "break"){
+            döngüKır = true;
+        }
+
+
+        // ======================================
+        // FONKSİYON
+        // ======================================
+
+        else if(satır.startsWith("fonksiyon ")){
+
+            let ad = satır
+                .replace("fonksiyon ","")
+                .replace("{","")
+                .trim();
+
+            let {blok,bitiş} = blokAl(satırlar,i);
+
+            fonksiyonlar[ad] = blok;
+
+            i = bitiş;
+        }
+
+
+        // ======================================
+        // FONKSİYON ÇAĞIR
+        // ======================================
+
+        else if(fonksiyonlar[satır]){
+            await çalıştır(fonksiyonlar[satır], çıktı);
+        }
+
+
+        // ======================================
+        // HATA
+        // ======================================
+
+        else{
+            çıktı.innerHTML += "Hata: " + satır + "<br>";
+        }
+    }
+}
+
+
+// ======================================================
+// BAŞLAT
+// ======================================================
+
+async function başlat(){
+
+    değişkenler = {};
+    fonksiyonlar = {};
+    döngüKır = false;
+
+    const kod = document.getElementById("kod").value;
+    const çıktı = document.getElementById("çıktı");
+
+    çıktı.innerHTML = "";
+
+    await çalıştır(kod.split("\n"), çıktı);
+}
+
+</script>
+
+</body>
+</html>
